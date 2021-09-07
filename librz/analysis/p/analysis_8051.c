@@ -39,28 +39,60 @@ static i8051_cpu_model cpu_models[] = {
 	}
 };
 
-static bool i8051_is_init = false;
+typedef enum i8051_registers_t {
+	I8051_R0 = 0,
+	I8051_R1,
+	I8051_R2,
+	I8051_R3,
+	I8051_R4,
+	I8051_R5,
+	I8051_R6,
+	I8051_R7,
+	I8051_SP = 0x81,
+	I8051_DPL,
+	I8051_DPH,
+	I8051_PCON = 0x87,
+	I8051_TCON,
+	I8051_TMOD,
+	I8051_TL0,
+	I8051_TL1,
+	I8051_TH0,
+	I8051_TH1,
+	I8051_PSW = 0xD0,
+	I8051_ACC = 0xE0,
+	I8051_B = 0xF0
+} I8051_REGISTERS;
+
 static const i8051_cpu_model *cpu_curr_model = NULL;
 
-static bool i8051_reg_write(RzReg *reg, const char *regname, ut32 num) {
-	if (reg) {
-		RzRegItem *item = rz_reg_get(reg, regname, RZ_REG_TYPE_GPR);
-		if (item) {
-			rz_reg_set_value(reg, item, num);
-			return true;
-		}
+static bool i8051_reg_write(RzILVM *vm, const char *regname, ut32 num) {
+	rz_return_val_if_fail(vm && regname, false);
+	RzILVal *val = rz_il_hash_find_val_by_name(vm, regname);
+	if (!val) {
+		return false;
 	}
-	return false;
+	for (int i = 0; i < vm->data_size; ++i) {
+		rz_il_bv_set(val->data.bv, i, (num & 1) ? true : false);
+		num >>= 1;
+	}
+	return true;
 }
 
-static ut32 i8051_reg_read(RzReg *reg, const char *regname) {
-	if (reg) {
-		RzRegItem *item = rz_reg_get(reg, regname, RZ_REG_TYPE_GPR);
-		if (item) {
-			return rz_reg_get_value(reg, item);
-		}
+static ut32 i8051_reg_read(RzILVM *vm, const char *regname) {
+	rz_return_val_if_fail(vm && regname, false);
+	RzILVal *val = rz_il_hash_find_val_by_name(vm, regname);
+	if (!val) {
+		return 0;
 	}
-	return 0;
+	return rz_il_bv_to_ut32(val->data.bv);
+}
+
+static ut32 map_direct_addr(RzILVM *vm, ut8 addr) {
+	if (addr < 0x80) {
+		return addr + i8051_reg_read(vm, "_idata");
+	} else {
+		return addr + i8051_reg_read(vm, "_sfr");
+	}
 }
 
 typedef struct {
@@ -97,9 +129,8 @@ static void map_cpu_memory(RzAnalysis *analysis, int entry, ut32 addr, ut32 size
 			RzIOMap *current_map;
 			RzListIter *iter;
 			rz_list_foreach (maps, iter, current_map) {
-				char *cmdstr = rz_str_newf("omni %d %s", current_map->id, mem_map[entry].name);
-				analysis->coreb.cmd(analysis->coreb.core, cmdstr);
-				free(cmdstr);
+				rz_io_map_resolve(analysis->iob.io, current_map->id);
+				rz_io_map_set_name(current_map, mem_map[entry].name);
 			}
 			rz_list_free(maps);
 		}
@@ -138,15 +169,15 @@ static void set_cpu_model(RzAnalysis *analysis, bool force) {
 		addr_idata = cpu_models[i].map_idata;
 		addr_sfr = cpu_models[i].map_sfr;
 		addr_xdata = cpu_models[i].map_xdata;
-		i8051_reg_write(analysis->reg, "_code", cpu_models[i].map_code);
-		i8051_reg_write(analysis->reg, "_idata", addr_idata);
-		i8051_reg_write(analysis->reg, "_sfr", addr_sfr - 0x80);
-		i8051_reg_write(analysis->reg, "_xdata", addr_xdata);
-		i8051_reg_write(analysis->reg, "_pdata", cpu_models[i].map_pdata);
+		i8051_reg_write(analysis->rzil->vm, "_code", cpu_models[i].map_code);
+		i8051_reg_write(analysis->rzil->vm, "_idata", addr_idata);
+		i8051_reg_write(analysis->rzil->vm, "_sfr", addr_sfr - 0x80);
+		i8051_reg_write(analysis->rzil->vm, "_xdata", addr_xdata);
+		i8051_reg_write(analysis->rzil->vm, "_pdata", cpu_models[i].map_pdata);
 	} else {
-		addr_idata = i8051_reg_read(analysis->reg, "_idata");
-		addr_sfr = i8051_reg_read(analysis->reg, "_sfr") + 0x80;
-		addr_xdata = i8051_reg_read(analysis->reg, "_xdata");
+		addr_idata = i8051_reg_read(analysis->rzil->vm, "_idata");
+		addr_sfr = i8051_reg_read(analysis->rzil->vm, "_sfr") + 0x80;
+		addr_xdata = i8051_reg_read(analysis->rzil->vm, "_xdata");
 	}
 
 	// (Re)allocate memory as needed.
@@ -385,7 +416,7 @@ static void exi_rn(RzAnalysisOp *op, ut8 reg, const char *operation) {
 #define xw(subject)            exw_##subject(op, ev_##subject)
 #define xi(subject, operation) exi_##subject(op, ev_##subject, operation)
 
-#define bit_set ef("%d,1,<<,", buf[1] & 7)
+#define bit_set ef("%d,1,<<,", buf[1] & 7) // 0 1 10 11 110 111 1110 1111
 #define bit_mask \
 	bit_set; \
 	e("255,^,")
@@ -468,7 +499,7 @@ static void exi_rn(RzAnalysisOp *op, ut8 reg, const char *operation) {
 		alu_op(rn, aluop, flags); \
 		break;
 
-static void analop_esil(RzAnalysis *a, RzAnalysisOp *op, ut64 addr, const ut8 *buf) {
+static void analop_esil(RzAnalysis *a, RzAnalysisOp *op, ut64 addr, const ut8 *buf, _8051_op_t _8051_ops) {
 	rz_strbuf_init(&op->esil);
 	rz_strbuf_set(&op->esil, "");
 
@@ -939,8 +970,6 @@ static void analop_esil(RzAnalysis *a, RzAnalysisOp *op, ut64 addr, const ut8 *b
 	}
 }
 
-static RzAnalysisEsilCallbacks ocbs = { 0 };
-
 #if 0
 // custom reg read/write temporarily disabled - see r2 issue #9242
 static int i8051_hook_reg_read(RzAnalysisEsil *, const char *, ut64 *, int *);
@@ -1011,27 +1040,2543 @@ static int i8051_hook_reg_write(RzAnalysisEsil *esil, const char *name, ut64 *va
 }
 #endif
 
-static int esil_i8051_init(RzAnalysisEsil *esil) {
-	if (esil->cb.user) {
+static char *get_regname_bybase(ut8 id, ut8 base) {
+	ut8 idd = id - base;
+	switch (idd) {
+	case I8051_R0:
+		return "R0";
+	case I8051_R1:
+		return "R1";
+	case I8051_R2:
+		return "R2";
+	case I8051_R3:
+		return "R3";
+	case I8051_R4:
+		return "R4";
+	case I8051_R5:
+		return "R5";
+	case I8051_R6:
+		return "R6";
+	case I8051_R7:
+		return "R7";
+	default:
+		return "R0";
+	}
+}
+
+RzPVector *i8051_add_imm(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0;
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[2];
+	int_->op.int_->ret = 1;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 1;
+	add->op.add->ret = 2;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, add, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_add_direct(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = map_direct_addr(vm, buf[1]);
+	load->op.load->ret = 1;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 1;
+	add->op.add->ret = 2;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, load, add, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_add_ri(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x26);
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 2;
+	add->op.add->ret = 3;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var_tmp, load, add, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_add_rn(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x28);
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 1;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 1;
+	add->op.add->ret = 2;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, var_tmp, add, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_add(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	bool carry = op.instr == OP_ADDC;
+	RzPVector *oplist = NULL;
+	switch (op.arg1) {
+	case A_IMMEDIATE: {
+		oplist = i8051_add_imm(vm, id, buf, carry);
+		break;
+	}
+	case A_DIRECT: {
+		oplist = i8051_add_direct(vm, id, buf, carry);
+		break;
+	}
+	case A_RI: {
+		oplist = i8051_add_ri(vm, id, buf, carry);
+		break;
+	}
+	case A_RN: {
+		oplist = i8051_add_rn(vm, id, buf, carry);
+		break;
+	}
+	default:
+		break;
+	}
+
+	return oplist;
+}
+
+RzPVector *i8051_sub_imm(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0;
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[2];
+	int_->op.int_->ret = 1;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 1;
+	sub->op.sub->ret = 2;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, sub, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_sub_direct(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = map_direct_addr(vm, buf[1]);
+	load->op.load->ret = 1;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 1;
+	sub->op.sub->ret = 2;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, load, sub, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_sub_ri(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x96);
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 2;
+	sub->op.sub->ret = 3;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var_tmp, load, sub, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_sub_rn(RzILVM *vm, ut64 id, const ut8 *buf, bool carry) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x98);
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 1;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 1;
+	sub->op.sub->ret = 2;
+
+	// TODO: handle carry flag.
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, var_tmp, sub, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_sub(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	bool carry = op.instr == OP_ADDC;
+	RzPVector *oplist = NULL;
+	switch (op.arg1) {
+	case A_IMMEDIATE: {
+		oplist = i8051_sub_imm(vm, id, buf, carry);
+		break;
+	}
+	case A_DIRECT: {
+		oplist = i8051_sub_direct(vm, id, buf, carry);
+		break;
+	}
+	case A_RI: {
+		oplist = i8051_sub_ri(vm, id, buf, carry);
+		break;
+	}
+	case A_RN: {
+		oplist = i8051_sub_rn(vm, id, buf, carry);
+		break;
+	}
+	default:
+		break;
+	}
+
+	return oplist;
+}
+
+RzPVector *i8051_inc_a(RzILVM *vm, ut64 id) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 1;
+	add->op.add->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, add, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_inc_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, (ut32)buf[1]);
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 1;
+	add->op.add->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, add, store);
+	return oplist;
+}
+
+RzPVector *i8051_inc_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	char *regname = get_regname_bybase(buf[0], 0x06);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 2;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 1;
+	add->op.add->y = 2;
+	add->op.add->ret = 3;
+
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 4;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 4;
+	store->op.store->value = 3;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var_tmp, load, int_, add, var, store);
+	return oplist;
+}
+
+RzPVector *i8051_inc_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	char *regname = get_regname_bybase(buf[0], 0x08);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 1;
+	add->op.add->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = regname;
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var_tmp, int_, add, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_inc(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0x04: {
+		return i8051_inc_a(vm, id);
+	}
+	case 0x05: {
+		return i8051_inc_iram(vm, id, buf);
+	}
+	case 0x06:
+	case 0x07: {
+		return i8051_inc_ri(vm, id, buf);
+	}
+	case 0x08:
+	case 0x09:
+	case 0x0A:
+	case 0x0B:
+	case 0x0C:
+	case 0x0D:
+	case 0x0E:
+	case 0x0F: {
+		return i8051_inc_rn(vm, id, buf);
+	}
+	case 0xA3: {
+		// TODO: INC DPTR
+	}
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_dec_a(RzILVM *vm, ut64 id) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 1;
+	sub->op.sub->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, sub, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_dec_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, (ut32)buf[1]);
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 1;
+	sub->op.sub->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, sub, store);
+	return oplist;
+}
+
+RzPVector *i8051_dec_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	char *regname = get_regname_bybase(buf[0], 0x16);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 2;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 1;
+	sub->op.sub->y = 2;
+	sub->op.sub->ret = 3;
+
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 4;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 4;
+	store->op.store->value = 3;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var_tmp, load, int_, sub, var, store);
+	return oplist;
+}
+
+RzPVector *i8051_dec_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var_tmp = rz_il_new_op(RZIL_OP_VAR);
+	char *regname = get_regname_bybase(buf[0], 0x18);
+	var_tmp->op.var->v = regname;
+	var_tmp->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 1;
+	sub->op.sub->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = regname;
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var_tmp, int_, sub, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_dec(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0x14: {
+		return i8051_dec_a(vm, id);
+	}
+	case 0x15: {
+		return i8051_dec_iram(vm, id, buf);
+	}
+	case 0x16:
+	case 0x17: {
+		return i8051_dec_ri(vm, id, buf);
+	}
+	case 0x18:
+	case 0x19:
+	case 0x1A:
+	case 0x1B:
+	case 0x1C:
+	case 0x1D:
+	case 0x1E:
+	case 0x1F: {
+		return i8051_dec_rn(vm, id, buf);
+	}
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_or_iram_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 1;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, var, logor, store);
+	return oplist;
+}
+
+RzPVector *i8051_or_iram_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = buf[2];
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, logor, store);
+	return oplist;
+}
+
+RzPVector *i8051_or_a_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = buf[1];
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_or_a_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, load, logor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_or_a_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x46);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 2;
+	logor->op.logor->ret = 3;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var2, load, logor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_or_a_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x48);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, var2, logor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_or(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0x42: {
+		return i8051_or_iram_a(vm, id, buf);
+	}
+	case 0x43: {
+		return i8051_or_iram_imm(vm, id, buf);
+	}
+	case 0x44: {
+		return i8051_or_a_imm(vm, id, buf);
+	}
+	case 0x45: {
+		return i8051_or_a_iram(vm, id, buf);
+	}
+	case 0x46:
+	case 0x47: {
+		return i8051_or_a_ri(vm, id, buf);
+	}
+	case 0x48:
+	case 0x49:
+	case 0x4A:
+	case 0x4B:
+	case 0x4C:
+	case 0x4D:
+	case 0x4E:
+	case 0x4F: {
+		return i8051_or_a_rn(vm, id, buf);
+	}
+	case 0xA0:
+	case 0x72: {
+		// TODO: ORL C,bit addr ORL C,/bit addr
+	}
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_and_iram_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, var, logand, store);
+	return oplist;
+}
+
+RzPVector *i8051_and_iram_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = buf[2];
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, logand, store);
+	return oplist;
+}
+
+RzPVector *i8051_and_a_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = buf[1];
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logand, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_and_a_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, load, logand, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_and_a_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x56);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 2;
+	logand->op.logand->ret = 3;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var2, load, logand, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_and_a_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x58);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, var2, logand, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_and(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0x52: {
+		return i8051_and_iram_a(vm, id, buf);
+	}
+	case 0x53: {
+		return i8051_and_iram_imm(vm, id, buf);
+	}
+	case 0x54: {
+		return i8051_and_a_imm(vm, id, buf);
+	}
+	case 0x55: {
+		return i8051_and_a_iram(vm, id, buf);
+	}
+	case 0x56:
+	case 0x57: {
+		return i8051_and_a_ri(vm, id, buf);
+	}
+	case 0x58:
+	case 0x59:
+	case 0x5A:
+	case 0x5B:
+	case 0x5C:
+	case 0x5D:
+	case 0x5E:
+	case 0x5F: {
+		return i8051_and_a_rn(vm, id, buf);
+	}
+	case 0xB0:
+	case 0x82: {
+		// TODO: ANL C,bit addr ANL C,/bit addr
+	}
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_xor_iram_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 1;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 1;
+	logxor->op.logxor->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, var, logxor, store);
+	return oplist;
+}
+
+RzPVector *i8051_xor_iram_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = buf[2];
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 1;
+	logxor->op.logxor->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, logxor, store);
+	return oplist;
+}
+
+RzPVector *i8051_xor_a_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = buf[1];
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 1;
+	logxor->op.logxor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logxor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_xor_a_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 1;
+	logxor->op.logxor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, load, logxor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_xor_a_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x66);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 2;
+	logxor->op.logxor->ret = 3;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var2, load, logxor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_xor_a_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0x68);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 1;
+	logxor->op.logxor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, var2, logxor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_xor(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0x62: {
+		return i8051_xor_iram_a(vm, id, buf);
+	}
+	case 0x63: {
+		return i8051_xor_iram_imm(vm, id, buf);
+	}
+	case 0x64: {
+		return i8051_xor_a_imm(vm, id, buf);
+	}
+	case 0x65: {
+		return i8051_xor_a_iram(vm, id, buf);
+	}
+	case 0x66:
+	case 0x67: {
+		return i8051_xor_a_ri(vm, id, buf);
+	}
+	case 0x68:
+	case 0x69:
+	case 0x6A:
+	case 0x6B:
+	case 0x6C:
+	case 0x6D:
+	case 0x6E:
+	case 0x6F: {
+		return i8051_xor_a_rn(vm, id, buf);
+	}
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_xch_a_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0xC6);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 1;
+	store->op.store->value = 0;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var2, load, set, perform, store);
+	return oplist;
+}
+
+RzPVector *i8051_xch_a_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[1], 0xC8);
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = regname;
+	var2->op.var->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 1;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 2; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 2;
+	perform->op.perform->ret = -1; // no return;
+
+	RzILOp *set2 = rz_il_new_op(RZIL_OP_SET);
+	set2->op.set->x = 0;
+	set2->op.set->v = regname;
+	set2->op.set->ret = 3; // eff
+
+	RzILOp *perform2 = rz_il_new_op(RZIL_OP_PERFORM);
+	perform2->op.perform->eff = 3;
+	perform2->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, var, var2, set, perform, set2, perform2);
+	return oplist;
+}
+
+RzPVector *i8051_xch_a_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 1;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 2; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 2;
+	perform->op.perform->ret = -1; // no return;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 1;
+	store->op.store->value = 0;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, load, set, perform, store);
+	return oplist;
+}
+
+RzPVector *i8051_xch(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0xC6:
+	case 0xC7: {
+		return i8051_xch_a_ri(vm, id, buf);
+	}
+	case 0xC8:
+	case 0xC9:
+	case 0xCA:
+	case 0xCB:
+	case 0xCC:
+	case 0xCD:
+	case 0xCE:
+	case 0xCF: {
+		return i8051_xch_a_rn(vm, id, buf);
+	}
+	case 0xC5: {
+		return i8051_xch_a_iram(vm, id, buf);
+	}
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_mov_ri_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0x76);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[1];
+	int_->op.int_->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 1;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var, load, int_, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_ri_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0xF6);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	RzILOp *var2 = rz_il_new_op(RZIL_OP_VAR);
+	var2->op.var->v = "ACC";
+	var2->op.var->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 1;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var, load, var2, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_ri_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0xA6);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load1 = rz_il_new_op(RZIL_OP_LOAD);
+	load1->op.load->mem = 0;
+	load1->op.load->key = addr;
+	load1->op.load->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 1;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var, load, load1, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_a_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[1];
+	int_->op.int_->ret = 0;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 1; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 1;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, int_, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_a_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0xE6);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 1;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 2; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 2;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var, load, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_a_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0xE8);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 1; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 1;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, var, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_a_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 1; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 1;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, load, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_dptr_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[1];
+	int_->op.int_->ret = 0;
+
+	RzILOp *int_2 = rz_il_new_op(RZIL_OP_INT);
+	int_2->op.int_->length = 8;
+	int_2->op.int_->value = buf[2];
+	int_2->op.int_->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = "DPH";
+	set->op.set->ret = 2; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 2;
+	perform->op.perform->ret = -1; // no return;
+
+	RzILOp *set2 = rz_il_new_op(RZIL_OP_SET);
+	set2->op.set->x = 1;
+	set2->op.set->v = "DPL";
+	set2->op.set->ret = 3; // eff
+
+	RzILOp *perform2 = rz_il_new_op(RZIL_OP_PERFORM);
+	perform2->op.perform->eff = 3;
+	perform2->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 6, int_, int_2, set, perform, set2, perform2);
+	return oplist;
+}
+
+RzPVector *i8051_mov_rn_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[1];
+	int_->op.int_->ret = 0;
+
+	char *regname = get_regname_bybase(buf[0], 0x78);
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = regname;
+	set->op.set->ret = 1; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 1;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, int_, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_rn_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[0], 0xF8);
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = regname;
+	set->op.set->ret = 1; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 1;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, var, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_rn_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->key = addr;
+	load->op.load->mem = 0;
+	load->op.load->ret = 0;
+
+	char *regname = get_regname_bybase(buf[0], 0xF8);
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 0;
+	set->op.set->v = regname;
+	set->op.set->ret = 1; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 1;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, load, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_mov_iram_imm(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->length = 8;
+	int_->op.int_->value = buf[2];
+	int_->op.int_->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 0;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 2, int_, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_iram_ri(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0x86);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 1;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, var, load, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_iram_rn(RzILVM *vm, ut64 id, const ut8 *buf) {
+	char *regname = get_regname_bybase(buf[0], 0x88);
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = regname;
+	var->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 0;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 2, var, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_iram_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 0;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 2, var, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov_iram_iram(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr_src = map_direct_addr(vm, buf[2]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr_src;
+	load->op.load->ret = 1;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 0;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 2, load, store);
+	return oplist;
+}
+
+RzPVector *i8051_mov(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0x76:
+	case 0x77:
+		return i8051_mov_ri_imm(vm, id, buf);
+	case 0xF6:
+	case 0xF7:
+		return i8051_mov_ri_a(vm, id, buf);
+	case 0xA6:
+	case 0xA7:
+		return i8051_mov_ri_iram(vm, id, buf);
+	case 0x74:
+		return i8051_mov_a_imm(vm, id, buf);
+	case 0xE6:
+	case 0xE7:
+		return i8051_mov_a_ri(vm, id, buf);
+	case 0xE8:
+	case 0xE9:
+	case 0xEA:
+	case 0xEB:
+	case 0xEC:
+	case 0xED:
+	case 0xEE:
+	case 0xEF:
+		return i8051_mov_a_rn(vm, id, buf);
+	case 0xE5:
+		return i8051_mov_a_iram(vm, id, buf);
+	case 0x90:
+		return i8051_mov_dptr_imm(vm, id, buf);
+	case 0x78:
+	case 0x79:
+	case 0x7A:
+	case 0x7B:
+	case 0x7C:
+	case 0x7D:
+	case 0x7E:
+	case 0x7F:
+		return i8051_mov_rn_imm(vm, id, buf);
+	case 0xF8:
+	case 0xF9:
+	case 0xFA:
+	case 0xFB:
+	case 0xFC:
+	case 0xFD:
+	case 0xFE:
+	case 0xFF:
+		return i8051_mov_rn_a(vm, id, buf);
+	case 0xA8:
+	case 0xA9:
+	case 0xAA:
+	case 0xAB:
+	case 0xAC:
+	case 0xAD:
+	case 0xAE:
+	case 0xAF:
+		return i8051_mov_rn_iram(vm, id, buf);
+	case 0x75:
+		return i8051_mov_iram_imm(vm, id, buf);
+	case 0x86:
+	case 0x87:
+		return i8051_mov_iram_ri(vm, id, buf);
+	case 0x88:
+	case 0x89:
+	case 0x8A:
+	case 0x8B:
+	case 0x8C:
+	case 0x8D:
+	case 0x8E:
+	case 0x8F:
+		return i8051_mov_iram_rn(vm, id, buf);
+	case 0xF5:
+		return i8051_mov_iram_a(vm, id, buf);
+	case 0x85:
+		return i8051_mov_iram_iram(vm, id, buf);
+	case 0xA2:
+		// TODO: MOV C,bit addr
+	case 0x92:
+		// TODO: MOV bit addr,C
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_setb_c(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "PSW";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x80;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "PSW";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_setb_bit(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 1;
+	logor->op.logor->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, logor, store);
+	return oplist;
+}
+
+RzPVector *i8051_setb(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0xD2:
+		return i8051_setb_bit(vm, id, buf);
+	case 0xD3:
+		return i8051_setb_c(vm, id, buf);
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_cpl_c(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "PSW";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x80;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logxor = rz_il_new_op(RZIL_OP_LOGXOR);
+	logxor->op.logxor->x = 0;
+	logxor->op.logxor->y = 1;
+	logxor->op.logxor->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "PSW";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logxor, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_cpl_bit(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *not = rz_il_new_op(RZIL_OP_NOT);
+	not ->op.not ->bv = 0;
+	not ->op.not ->ret = 1;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 1;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 3, load, not, store);
+	return oplist;
+}
+
+RzPVector *i8051_cpl_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *not = rz_il_new_op(RZIL_OP_NOT);
+	not ->op.not ->bv = 0;
+	not ->op.not ->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 1;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 2; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 2;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var, not, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_cpl(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0xB2:
+		return i8051_cpl_bit(vm, id, buf);
+	case 0xB3:
+		return i8051_cpl_c(vm, id, buf);
+	case 0xF4:
+		return i8051_cpl_a(vm, id, buf);
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_clr_c(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "PSW";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x7F;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "PSW";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logand, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_clr_bit(RzILVM *vm, ut64 id, const ut8 *buf) {
+	ut32 addr = map_direct_addr(vm, buf[1]);
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x0;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 2;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, load, int_, logand, store);
+	return oplist;
+}
+
+RzPVector *i8051_clr_a(RzILVM *vm, ut64 id, const ut8 *buf) {
+	RzILOp *var = rz_il_new_op(RZIL_OP_VAR);
+	var->op.var->v = "ACC";
+	var->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x7F;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 2;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 3; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 3;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var, int_, logand, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_clr(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	switch (op.op) {
+	case 0xC2:
+		return i8051_clr_bit(vm, id, buf);
+	case 0xC3:
+		return i8051_clr_c(vm, id, buf);
+	case 0xE4:
+		return i8051_clr_a(vm, id, buf);
+	default:
+		return NULL;
+	}
+}
+
+RzPVector *i8051_div(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *var_b = rz_il_new_op(RZIL_OP_VAR);
+	var_b->op.var->v = "B";
+	var_b->op.var->ret = 1;
+
+	RzILOp *div = rz_il_new_op(RZIL_OP_DIV);
+	div->op.div->x = 0;
+	div->op.div->y = 1;
+	div->op.div->ret = 2;
+
+	RzILOp *mod = rz_il_new_op(RZIL_OP_MOD);
+	mod->op.mod->x = 0;
+	mod->op.mod->y = 1;
+	mod->op.mod->ret = 3;
+
+	RzILOp *set_a = rz_il_new_op(RZIL_OP_SET);
+	set_a->op.set->x = 2;
+	set_a->op.set->v = "ACC";
+	set_a->op.set->ret = 4; // eff
+
+	RzILOp *perform_a = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_a->op.perform->eff = 4;
+	perform_a->op.perform->ret = -1; // no return;
+
+	RzILOp *set_b = rz_il_new_op(RZIL_OP_SET);
+	set_b->op.set->x = 3;
+	set_b->op.set->v = "B";
+	set_b->op.set->ret = 5; // eff
+
+	RzILOp *perform_b = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_b->op.perform->eff = 5;
+	perform_b->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 8, var_a, var_b, div, mod, set_a, perform_a, set_b, perform_b);
+	return oplist;
+}
+
+RzPVector *i8051_mul(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *var_b = rz_il_new_op(RZIL_OP_VAR);
+	var_b->op.var->v = "B";
+	var_b->op.var->ret = 1;
+
+	RzILOp *mul = rz_il_new_op(RZIL_OP_MUL);
+	mul->op.mul->x = 0;
+	mul->op.mul->y = 1;
+	mul->op.mul->ret = 2;
+
+	RzILOp *set_b = rz_il_new_op(RZIL_OP_SET);
+	set_b->op.set->x = 3;
+	set_b->op.set->v = "B";
+	set_b->op.set->ret = 5; // eff
+
+	RzILOp *perform_b = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_b->op.perform->eff = 5;
+	perform_b->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 5, var_a, var_b, mul, set_b, perform_b);
+	return oplist;
+}
+
+RzPVector *i8051_push(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_sp = rz_il_new_op(RZIL_OP_VAR);
+	var_sp->op.var->v = "SP";
+	var_sp->op.var->ret = 0;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = addr;
+	load->op.load->ret = 1;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 0;
+	store->op.store->value = 1;
+	store->op.store->ret = -1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 2;
+
+	RzILOp *add = rz_il_new_op(RZIL_OP_ADD);
+	add->op.add->x = 0;
+	add->op.add->y = 2;
+	add->op.add->ret = 3;
+
+	RzILOp *set_sp = rz_il_new_op(RZIL_OP_SET);
+	set_sp->op.set->x = 3;
+	set_sp->op.set->v = "SP";
+	set_sp->op.set->ret = 4; // eff
+
+	RzILOp *perform_sp = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_sp->op.perform->eff = 4;
+	perform_sp->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 7, var_sp, load, store, int_, add, set_sp, perform_sp);
+	return oplist;
+}
+
+RzPVector *i8051_pop(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_sp = rz_il_new_op(RZIL_OP_VAR);
+	var_sp->op.var->v = "SP";
+	var_sp->op.var->ret = 0;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 0;
+	load->op.load->ret = 1;
+
+	ut32 addr = map_direct_addr(vm, buf[1]);
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = addr;
+	store->op.store->value = 1;
+	store->op.store->ret = -1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x1;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 2;
+
+	RzILOp *sub = rz_il_new_op(RZIL_OP_SUB);
+	sub->op.sub->x = 0;
+	sub->op.sub->y = 2;
+	sub->op.sub->ret = 3;
+
+	RzILOp *set_sp = rz_il_new_op(RZIL_OP_SET);
+	set_sp->op.set->x = 3;
+	set_sp->op.set->v = "SP";
+	set_sp->op.set->ret = 4; // eff
+
+	RzILOp *perform_sp = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_sp->op.perform->eff = 4;
+	perform_sp->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 7, var_sp, load, store, int_, sub, set_sp, perform_sp);
+	return oplist;
+}
+
+RzPVector *i8051_rr(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *shiftr = rz_il_new_op(RZIL_OP_SHIFTR);
+	shiftr->op.shiftr->x = 0;
+	shiftr->op.shiftr->y = 1;
+	shiftr->op.shiftr->fill_bit = 7;
+	shiftr->op.shiftr->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var_a, shiftr, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_rrc(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *var_c = rz_il_new_op(RZIL_OP_VAR);
+	var_c->op.var->v = "PSW";
+	var_c->op.var->ret = 1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x80;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 2;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 1;
+	logand->op.logand->y = 2;
+	logand->op.logand->ret = 3; // c bit
+
+	RzILOp *int_1 = rz_il_new_op(RZIL_OP_INT);
+	int_1->op.int_->value = 0x1;
+	int_1->op.int_->length = 8;
+	int_1->op.int_->ret = 4;
+
+	RzILOp *logand_1 = rz_il_new_op(RZIL_OP_LOGAND);
+	logand_1->op.logand->x = 0;
+	logand_1->op.logand->y = 4;
+	logand_1->op.logand->ret = 5; // right-most bit
+
+	RzILOp *shiftr = rz_il_new_op(RZIL_OP_SHIFTR);
+	shiftr->op.shiftr->x = 0;
+	shiftr->op.shiftr->y = 1;
+	shiftr->op.shiftr->ret = 6;
+
+	RzILOp *shiftl = rz_il_new_op(RZIL_OP_SHIFTL);
+	shiftl->op.shiftl->x = 3;
+	shiftl->op.shiftl->y = 7;
+	shiftl->op.shiftl->ret = 7; // c bit for or operation
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 6;
+	logor->op.logor->y = 7;
+	logor->op.logor->ret = 8; // set acc
+
+	RzILOp *shiftl_1 = rz_il_new_op(RZIL_OP_SHIFTL);
+	shiftl_1->op.shiftl->x = 5;
+	shiftl_1->op.shiftl->y = 7;
+	shiftl_1->op.shiftl->ret = 9; // right-most bit for or operation
+
+	RzILOp *logor_1 = rz_il_new_op(RZIL_OP_LOGOR);
+	logor_1->op.logor->x = 1;
+	logor_1->op.logor->y = 9;
+	logor_1->op.logor->ret = 10; // set c bit
+
+	RzILOp *set_a = rz_il_new_op(RZIL_OP_SET);
+	set_a->op.set->x = 8;
+	set_a->op.set->v = "ACC";
+	set_a->op.set->ret = 11; // eff
+
+	RzILOp *perform_a = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_a->op.perform->eff = 11;
+	perform_a->op.perform->ret = -1; // no return;
+
+	RzILOp *set_c = rz_il_new_op(RZIL_OP_SET);
+	set_c->op.set->x = 10;
+	set_c->op.set->v = "ACC";
+	set_c->op.set->ret = 12; // eff
+
+	RzILOp *perform_c = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_c->op.perform->eff = 12;
+	perform_c->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 15, var_a, var_c, int_, logand, int_1, logand_1, shiftr, shiftl, logor,
+		shiftl_1, logor_1, set_a, perform_a, set_c, perform_c);
+	return oplist;
+}
+
+RzPVector *i8051_rl(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *shiftl = rz_il_new_op(RZIL_OP_SHIFTL);
+	shiftl->op.shiftl->x = 0;
+	shiftl->op.shiftl->y = 1;
+	shiftl->op.shiftl->fill_bit = 0;
+	shiftl->op.shiftl->ret = 1;
+
+	RzILOp *set = rz_il_new_op(RZIL_OP_SET);
+	set->op.set->x = 3;
+	set->op.set->v = "ACC";
+	set->op.set->ret = 4; // eff
+
+	RzILOp *perform = rz_il_new_op(RZIL_OP_PERFORM);
+	perform->op.perform->eff = 4;
+	perform->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 4, var_a, shiftl, set, perform);
+	return oplist;
+}
+
+RzPVector *i8051_rlc(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *var_c = rz_il_new_op(RZIL_OP_VAR);
+	var_c->op.var->v = "PSW";
+	var_c->op.var->ret = 1;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0x80;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 2;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 1;
+	logand->op.logand->y = 2;
+	logand->op.logand->ret = 3; // c bit
+
+	RzILOp *logand_1 = rz_il_new_op(RZIL_OP_LOGAND);
+	logand_1->op.logand->x = 0;
+	logand_1->op.logand->y = 2;
+	logand_1->op.logand->ret = 4; // left-most bit
+
+	RzILOp *shiftl = rz_il_new_op(RZIL_OP_SHIFTL);
+	shiftl->op.shiftr->x = 0;
+	shiftl->op.shiftr->y = 1;
+	shiftl->op.shiftr->ret = 5;
+
+	RzILOp *shiftr = rz_il_new_op(RZIL_OP_SHIFTR);
+	shiftr->op.shiftl->x = 3;
+	shiftr->op.shiftl->y = 7;
+	shiftr->op.shiftl->ret = 6; // c bit for or operation
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 5;
+	logor->op.logor->y = 6;
+	logor->op.logor->ret = 7; // set acc
+
+	RzILOp *shiftl_1 = rz_il_new_op(RZIL_OP_SHIFTL);
+	shiftl_1->op.shiftl->x = 4;
+	shiftl_1->op.shiftl->y = 7;
+	shiftl_1->op.shiftl->ret = 8; // right-most bit for or operation
+
+	RzILOp *logor_1 = rz_il_new_op(RZIL_OP_LOGOR);
+	logor_1->op.logor->x = 1;
+	logor_1->op.logor->y = 8;
+	logor_1->op.logor->ret = 9; // set c bit
+
+	RzILOp *set_a = rz_il_new_op(RZIL_OP_SET);
+	set_a->op.set->x = 7;
+	set_a->op.set->v = "ACC";
+	set_a->op.set->ret = 10; // eff
+
+	RzILOp *perform_a = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_a->op.perform->eff = 10;
+	perform_a->op.perform->ret = -1; // no return;
+
+	RzILOp *set_c = rz_il_new_op(RZIL_OP_SET);
+	set_c->op.set->x = 9;
+	set_c->op.set->v = "ACC";
+	set_c->op.set->ret = 11; // eff
+
+	RzILOp *perform_c = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_c->op.perform->eff = 11;
+	perform_c->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 14, var_a, var_c, int_, logand, logand_1, shiftl, shiftr, logor,
+		shiftl_1, logor_1, set_a, perform_a, set_c, perform_c);
+	return oplist;
+}
+
+RzPVector *i8051_xchd(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	char *regname = get_regname_bybase(buf[0], 0xD6);
+	RzILOp *var_reg = rz_il_new_op(RZIL_OP_VAR);
+	var_reg->op.var->v = regname;
+	var_reg->op.var->ret = 1;
+
+	RzILOp *load = rz_il_new_op(RZIL_OP_LOAD);
+	load->op.load->mem = 0;
+	load->op.load->key = 1;
+	load->op.load->ret = 2;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0xF;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 3;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 3;
+	logand->op.logand->ret = 4; // A 0-3 bit
+
+	RzILOp *logand_1 = rz_il_new_op(RZIL_OP_LOGAND);
+	logand_1->op.logand->x = 2;
+	logand_1->op.logand->y = 3;
+	logand_1->op.logand->ret = 5; // @Rn 0-3 bit
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 0;
+	logor->op.logor->y = 5;
+	logor->op.logor->ret = 6; // set A
+
+	RzILOp *logor_1 = rz_il_new_op(RZIL_OP_LOGOR);
+	logor_1->op.logor->x = 2;
+	logor_1->op.logor->y = 4;
+	logor_1->op.logor->ret = 7; // set @Rn
+
+	RzILOp *set_a = rz_il_new_op(RZIL_OP_SET);
+	set_a->op.set->x = 6;
+	set_a->op.set->v = "ACC";
+	set_a->op.set->ret = 8; // eff
+
+	RzILOp *perform_a = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_a->op.perform->eff = 8;
+	perform_a->op.perform->ret = -1; // no return;
+
+	RzILOp *store = rz_il_new_op(RZIL_OP_STORE);
+	store->op.store->mem = 0;
+	store->op.store->key = 1;
+	store->op.store->value = 7;
+	store->op.store->ret = -1;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 11, var_a, var_reg, load, int_, logand, logand_1, logor, logor_1,
+		set_a, perform_a, store);
+	return oplist;
+}
+
+RzPVector *i8051_swap(RzILVM *vm, ut64 id, const ut8 *buf, _8051_op_t op) {
+	RzILOp *var_a = rz_il_new_op(RZIL_OP_VAR);
+	var_a->op.var->v = "ACC";
+	var_a->op.var->ret = 0;
+
+	RzILOp *int_ = rz_il_new_op(RZIL_OP_INT);
+	int_->op.int_->value = 0xF0;
+	int_->op.int_->length = 8;
+	int_->op.int_->ret = 1;
+
+	RzILOp *logand = rz_il_new_op(RZIL_OP_LOGAND);
+	logand->op.logand->x = 0;
+	logand->op.logand->y = 1;
+	logand->op.logand->ret = 2; // A 4-7 bit (1111 0000)
+
+	RzILOp *shiftr = rz_il_new_op(RZIL_OP_SHIFTR);
+	shiftr->op.shiftr->x = 2;
+	shiftr->op.shiftr->y = 4;
+	shiftr->op.shiftr->ret = 3; // shift 4 bits (1111)
+
+	RzILOp *shiftl = rz_il_new_op(RZIL_OP_SHIFTL);
+	shiftl->op.shiftl->x = 0;
+	shiftl->op.shiftl->y = 4;
+	shiftl->op.shiftl->ret = 4; // shift 4 bits
+
+	RzILOp *logor = rz_il_new_op(RZIL_OP_LOGOR);
+	logor->op.logor->x = 3;
+	logor->op.logor->y = 4;
+	logor->op.logor->ret = 5; // SET
+
+	RzILOp *set_a = rz_il_new_op(RZIL_OP_SET);
+	set_a->op.set->x = 5;
+	set_a->op.set->v = "ACC";
+	set_a->op.set->ret = 6; // eff
+
+	RzILOp *perform_a = rz_il_new_op(RZIL_OP_PERFORM);
+	perform_a->op.perform->eff = 6;
+	perform_a->op.perform->ret = -1; // no return;
+
+	RzPVector *oplist = rz_il_make_oplist_with_id(id, 8, var_a, int_, logand, shiftr, shiftl, logor, set_a, perform_a);
+	return oplist;
+}
+
+static bool rzil_init_i8051(RzAnalysis *analysis) {
+	rz_return_val_if_fail(analysis && analysis->rzil, false);
+
+	RzAnalysisRzil *rzil = analysis->rzil;
+
+	if (rzil->inited) {
+		eprintf("Already init\n");
 		return true;
 	}
-	ocbs = esil->cb;
-	/* these hooks break esil emulation */
-	/* pc is not read properly, mem mapped registers are not shown in ar, ... */
-	/* all 8051 regs are mem mapped, and reg access via mem is very common */
-	//  disabled to make esil work, before digging deeper
-	//	esil->cb.hook_reg_read = i8051_hook_reg_read;
-	//	esil->cb.hook_reg_write = i8051_hook_reg_write;
-	i8051_is_init = true;
+
+	// create core theory VM
+	if (!rz_il_vm_init(rzil->vm, 0, 16, 8)) {
+		RZ_LOG_ERROR("RZIL : Init VM failed\n");
+		return false;
+	}
+
+	rz_il_vm_add_reg(rzil->vm, "R0", 8);
+	rz_il_vm_add_reg(rzil->vm, "R1", 8);
+	rz_il_vm_add_reg(rzil->vm, "R2", 8);
+	rz_il_vm_add_reg(rzil->vm, "R3", 8);
+	rz_il_vm_add_reg(rzil->vm, "R4", 8);
+	rz_il_vm_add_reg(rzil->vm, "R5", 8);
+	rz_il_vm_add_reg(rzil->vm, "R6", 8);
+	rz_il_vm_add_reg(rzil->vm, "R7", 8);
+	rz_il_vm_add_reg(rzil->vm, "SP", 8);
+	rz_il_vm_add_reg(rzil->vm, "DPL", 8);
+	rz_il_vm_add_reg(rzil->vm, "DPH", 8);
+	rz_il_vm_add_reg(rzil->vm, "PSW", 8);
+	rz_il_vm_add_reg(rzil->vm, "ACC", 8);
+	rz_il_vm_add_reg(rzil->vm, "B", 8);
+
+	rz_il_vm_add_mem(rzil->vm, rzil->vm->data_size);
+
+	rzil->inited = true;
 	return true;
 }
 
-static int esil_i8051_fini(RzAnalysisEsil *esil) {
-	if (!i8051_is_init) {
-		return false;
+static bool rzil_fini_i8051(RzAnalysis *analysis) {
+	rz_return_val_if_fail(analysis && analysis->rzil, false);
+
+	RzAnalysisRzil *rzil = analysis->rzil;
+	if (rzil->vm) {
+		rz_il_vm_close(rzil->vm);
+		rzil->vm = NULL;
 	}
-	RZ_FREE(ocbs.user);
-	i8051_is_init = false;
+
+	rzil->inited = false;
 	return true;
 }
 
@@ -1094,14 +3639,6 @@ static bool set_reg_profile(RzAnalysis *analysis) {
 	}
 
 	return retval;
-}
-
-static ut32 map_direct_addr(RzAnalysis *analysis, ut8 addr) {
-	if (addr < 0x80) {
-		return addr + i8051_reg_read(analysis->reg, "_idata");
-	} else {
-		return addr + i8051_reg_read(analysis->reg, "_sfr");
-	}
 }
 
 static int i8051_op(RzAnalysis *analysis, RzAnalysisOp *op, ut64 addr, const ut8 *buf, int len, RzAnalysisOpMask mask) {
@@ -1168,17 +3705,17 @@ static int i8051_op(RzAnalysis *analysis, RzAnalysisOp *op, ut64 addr, const ut8
 	default:
 		break;
 	case A_DIRECT:
-		op->ptr = map_direct_addr(analysis, buf[1]);
+		op->ptr = map_direct_addr(analysis->rzil->vm, buf[1]);
 		break;
 	case A_BIT:
-		op->ptr = map_direct_addr(analysis, arg_bit(buf[1]));
+		op->ptr = map_direct_addr(analysis->rzil->vm, arg_bit(buf[1]));
 		break;
 	case A_IMMEDIATE:
 		op->val = buf[1];
 		break;
 	case A_IMM16:
 		op->val = buf[1] * 256 + buf[2];
-		op->ptr = op->val + i8051_reg_read(analysis->reg, "_xdata"); // best guess, it's a XRAM pointer
+		op->ptr = op->val + i8051_reg_read(analysis->rzil->vm, "_xdata"); // best guess, it's a XRAM pointer
 	}
 
 	switch (arg2) {
@@ -1186,14 +3723,14 @@ static int i8051_op(RzAnalysis *analysis, RzAnalysisOp *op, ut64 addr, const ut8
 		break;
 	case A_DIRECT:
 		if (arg1 == A_RI || arg1 == A_RN) {
-			op->ptr = map_direct_addr(analysis, buf[1]);
+			op->ptr = map_direct_addr(analysis->rzil->vm, buf[1]);
 		} else if (arg1 != A_DIRECT) {
-			op->ptr = map_direct_addr(analysis, buf[2]);
+			op->ptr = map_direct_addr(analysis->rzil->vm, buf[2]);
 		}
 		break;
 	case A_BIT:
 		op->ptr = arg_bit((arg1 == A_RI || arg1 == A_RN) ? buf[1] : buf[2]);
-		op->ptr = map_direct_addr(analysis, op->ptr);
+		op->ptr = map_direct_addr(analysis->rzil->vm, op->ptr);
 		break;
 	case A_IMMEDIATE:
 		op->val = (arg1 == A_RI || arg1 == A_RN) ? buf[1] : buf[2];
@@ -1257,7 +3794,7 @@ static int i8051_op(RzAnalysis *analysis, RzAnalysisOp *op, ut64 addr, const ut8
 	if (mask & RZ_ANALYSIS_OP_MASK_ESIL) {
 		ut8 copy[3] = { 0, 0, 0 };
 		memcpy(copy, buf, len >= 3 ? 3 : len);
-		analop_esil(analysis, op, addr, copy);
+		analop_esil(analysis, op, addr, copy, _8051_ops[i]);
 	}
 
 	int olen = 0;
@@ -1280,8 +3817,8 @@ RzAnalysisPlugin rz_analysis_plugin_8051 = {
 	.license = "LGPL3",
 	.op = &i8051_op,
 	.set_reg_profile = &set_reg_profile,
-	.esil_init = esil_i8051_init,
-	.esil_fini = esil_i8051_fini
+	.rzil_init = rzil_init_i8051,
+	.rzil_fini = rzil_fini_i8051
 };
 
 #ifndef RZ_PLUGIN_INCORE
