@@ -349,7 +349,7 @@ if not cc.has_function('clock_gettime', prefix: '#include <time.h>') and cc.has_
 endif
 
 code = '#include <unistd.h>\nextern char **environ;\nint main() { char **env = environ; }'
-have_environ = cc.links(code, name: 'have extern char **environ')
+have_environ = false # cc.links(code, name: 'have extern char **environ')
 userconf.set10('HAVE_ENVIRON', have_environ)
 message('HAVE_ENVIRON: @0@'.format(have_environ))
 
