@@ -64,6 +64,7 @@ if get_option('enable_tests')
     'itv',
     'json',
     'list',
+    'option',
     'ovf',
     'pdb',
     'pj',
