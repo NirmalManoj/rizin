@@ -11,129 +11,6 @@
 
 char *getcommapath(RzCore *core);
 
-static const char *help_msg_C[] = {
-	"Usage:", "C[-LCvsdfm*?][*?] [...]", " # Metadata management",
-	"C", "", "list meta info in human friendly form",
-	"C*", "", "list meta info in rizin commands",
-	"C*.", "", "list meta info of current offset in rizin commands",
-	"C-", " [len] [[@]addr]", "delete metadata at given address range",
-	"C.", "", "list meta info of current offset in human friendly form",
-	"CC!", " [@addr]", "edit comment with $EDITOR",
-	"CC", "[?] [-] [comment-text] [@addr]", "add/remove comment",
-	"CC.", "[addr]", "show comment in current address",
-	"CCa", "[+-] [addr] [text]", "add/remove comment at given address",
-	"CCu", " [comment-text] [@addr]", "add unique comment",
-	"CF", "[sz] [fcn-sign..] [@addr]", "function signature",
-	"CS", "[-][space]", "manage meta-spaces to filter comments, etc..",
-	"C[Cthsdmf]", "", "list comments/types/hidden/strings/data/magic/formatted in human friendly form",
-	"C[Cthsdmf]*", "", "list comments/types/hidden/strings/data/magic/formatted in rizin commands",
-	"Cd", "[-] [size] [repeat] [@addr]", "hexdump data array (Cd 4 10 == dword [10])",
-	"Cd.", " [@addr]", "show size of data at current address",
-	"Cf", "[?][-] [sz] [0|cnt][fmt] [a0 a1...] [@addr]", "format memory (see pf?)",
-	"Ch", "[-] [size] [@addr]", "hide data",
-	"Cm", "[-] [sz] [fmt..] [@addr]", "magic parse (see pm?)",
-	"Cs", "[?] [-] [size] [@addr]", "add string",
-	"Ct", "[?] [-] [comment-text] [@addr]", "add/remove type analysis comment",
-	"Ct.", "[@addr]", "show comment at current or specified address",
-	"Cv", "[bsr][?]", "add comments to args",
-	"Cz", "[@addr]", "add string (see Cs?)",
-	NULL
-};
-
-static const char *help_msg_CC[] = {
-	"Usage:", "CC[-+!*au] [base64:..|str] @ addr", "",
-	"CC!", "", "edit comment using cfg.editor (vim, ..)",
-	"CC", " [text]", "append comment at current address",
-	"CC", "", "list all comments in human friendly form",
-	"CC*", "", "list all comments in rizin commands",
-	"CC+", " [text]", "append comment at current address",
-	"CC,", " [file]", "show or set comment file",
-	"CC-", " @ cmt_addr", "remove comment at given address",
-	"CC.", "", "show comment at current offset",
-	"CCf", "", "list comments in function",
-	"CCf-", "", "delete all comments in current function",
-	"CCu", " base64:AA== @ addr", "add comment in base64",
-	"CCu", " good boy @ addr", "add good boy comment at given address",
-	NULL
-};
-
-static const char *help_msg_Ct[] = {
-	"Usage: Ct", "[.|-] [@ addr]", " # Manage comments for variable types",
-	"Ct", "", "list all variable type comments",
-	"Ct", " comment-text [@ addr]", "place comment at current or specified address",
-	"Ct.", " [@ addr]", "show comment at current or specified address",
-	"Ct-", " [@ addr]", "remove comment at current or specified address",
-	NULL
-};
-
-static const char *help_msg_CS[] = {
-	"Usage: CS", "[*] [+-][metaspace|addr]", " # Manage metaspaces",
-	"CS", "", "display metaspaces",
-	"CS", " *", "select all metaspaces",
-	"CS", " metaspace", "select metaspace or create if it doesn't exist",
-	"CS", "-metaspace", "remove metaspace",
-	"CS", "-*", "remove all metaspaces",
-	"CS", "+foo", "push previous metaspace and set",
-	"CS", "-", "pop to the previous metaspace",
-	//	"CSm"," [addr]","move metas at given address to the current metaspace",
-	"CSr", " newname", "rename selected metaspace",
-	NULL
-};
-
-static const char *help_msg_Cs[] = {
-	"Usage:", "Cs[ga-*.] [size] [@addr]", "",
-	"NOTE:", " size", "1 unit in bytes == width in bytes of smallest possible char in encoding,",
-	"", "", "  so ascii/latin1/utf8 = 1, utf16le = 2",
-	" Cz", " [size] [@addr]", "ditto",
-	"Cs", " [size] @addr", "add string (guess latin1/utf16le)",
-	"Cs", "", "list all strings in human friendly form",
-	"Cs*", "", "list all strings in rizin commands",
-	"Cs-", " [@addr]", "remove string",
-	"Cs.", "", "show string at current address",
-	"Cs..", "", "show string + info about it at current address",
-	"Cs.j", "", "show string at current address in JSON",
-	"Cs8", " [size] [@addr]", "add utf8 string",
-	"Csa", " [size] [@addr]", "add ascii/latin1 string",
-	"Csg", " [size] [@addr]", "as above but addr not needed",
-	NULL
-};
-
-static const char *help_msg_Cvb[] = {
-	"Usage:", "Cvb", "[name] [comment]",
-	"Cvb?", "", "show this help",
-	"Cvb", "", "list all base pointer args/vars comments in human friendly format",
-	"Cvb*", "", "list all base pointer args/vars comments in rizin format",
-	"Cvb-", "[name]", "delete comments for var/arg at current offset for base pointer",
-	"Cvb", " [name]", "Show comments for var/arg at current offset for base pointer",
-	"Cvb", " [name] [comment]", "add/append comment for the variable with the current name",
-	"Cvb!", "[name]", "edit comment using cfg editor",
-	NULL
-};
-
-static const char *help_msg_Cvr[] = {
-	"Usage:", "Cvr", "[name] [comment]",
-	"Cvr?", "", "show this help",
-	"Cvr", "", "list all register based args comments in human friendly format",
-	"Cvr*", "", "list all register based args comments in rizin format",
-	"Cvr-", "[name]", "delete comments for register based arg for that name",
-	"Cvr", "[name]", "Show comments for register based arg for that name",
-	"Cvr", "[name] [comment]", "add/append comment for the variable",
-	"Cvr!", "[name]", "edit comment using cfg editor",
-	NULL
-};
-
-static const char *help_msg_Cvs[] = {
-	"Usage:", "Cvs", "[name] [comment]",
-	"Cvs!", "[name]", "edit comment using cfg editor",
-	"Cvs", "", "list all stack based args/vars comments in human friendly format",
-	"Cvs", "[name] [comment]", "add/append comment for the variable",
-	"Cvs", "[name]", "Show comments for stack pointer var/arg with that name",
-	"Cvs*", "", "list all stack based args/vars comments in rizin format",
-	"Cvs-", "[name]", "delete comments for stack pointer var/arg with that name",
-	"Cvs?", "", "show this help",
-	NULL
-};
-
 RZ_IPI void rz_core_meta_comment_add(RzCore *core, const char *comment, ut64 addr) {
 	const char *oldcomment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
 	if (!oldcomment || (oldcomment && !strstr(oldcomment, comment))) {
@@ -141,256 +18,13 @@ RZ_IPI void rz_core_meta_comment_add(RzCore *core, const char *comment, ut64 add
 	}
 }
 
-static int cmd_meta_comment(RzCore *core, const char *input) {
-	ut64 addr = core->offset;
-	switch (input[1]) {
-	case '?':
-		rz_core_cmd_help(core, help_msg_CC);
-		break;
-	case ',': // "CC,"
-		if (input[2] == '?') {
-			eprintf("Usage: CC, [file]\n");
-		} else if (input[2] == ' ') {
-			const char *fn = input + 2;
-			const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
-			while (*fn == ' ')
-				fn++;
-			if (comment && *comment) {
-				// append filename in current comment
-				char *nc = rz_str_newf("%s ,(%s)", comment, fn);
-				rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, addr, nc);
-				free(nc);
-			} else {
-				char *newcomment = rz_str_newf(",(%s)", fn);
-				rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, addr, newcomment);
-				free(newcomment);
-			}
-		} else {
-			const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
-			if (comment && *comment) {
-				char *cmtfile = rz_str_between(comment, ",(", ")");
-				if (cmtfile && *cmtfile) {
-					char *cwd = getcommapath(core);
-					rz_cons_printf("%s" RZ_SYS_DIR "%s\n", cwd, cmtfile);
-					free(cwd);
-				}
-				free(cmtfile);
-			}
-		}
-		break;
-	case '.': {
-		ut64 at = input[2] ? rz_num_math(core->num, input + 2) : addr;
-		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, at);
-		if (comment) {
-			rz_cons_println(comment);
-		}
-	} break;
-	case 0: // "CC"
-		rz_meta_print_list_all(core->analysis, RZ_META_TYPE_COMMENT, 0);
-		break;
-	case 'f': // "CCf"
-		switch (input[2]) {
-		case '-': // "CCf-"
-		{
-			ut64 arg = rz_num_math(core->num, input + 2);
-			if (!arg) {
-				arg = core->offset;
-			}
-			RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, arg, 0);
-			if (fcn) {
-				RzAnalysisBlock *bb;
-				RzListIter *iter;
-				rz_list_foreach (fcn->bbs, iter, bb) {
-					int i;
-					for (i = 0; i < bb->size; i++) {
-						ut64 addr = bb->addr + i;
-						rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, addr, 1);
-					}
-				}
-			}
-		} break;
-		case 'j': // "CCfj"
-			rz_meta_print_list_in_function(core->analysis, RZ_META_TYPE_COMMENT, 'j', core->offset);
-			break;
-		case '*': // "CCf*"
-			rz_meta_print_list_in_function(core->analysis, RZ_META_TYPE_COMMENT, 1, core->offset);
-			break;
-		default:
-			rz_meta_print_list_in_function(core->analysis, RZ_META_TYPE_COMMENT, 0, core->offset);
-			break;
-		}
-		break;
-	case 'j': // "CCj"
-		rz_meta_print_list_all(core->analysis, RZ_META_TYPE_COMMENT, 'j');
-		break;
-	case '!': {
-		char *out;
-		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
-		out = rz_core_editor(core, NULL, comment);
-		if (out) {
-			rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, addr, 1);
-			rz_meta_set_string(core->analysis,
-				RZ_META_TYPE_COMMENT, addr, out);
-			free(out);
-		}
-	} break;
-	case '+':
-	case ' ': {
-		const char *newcomment = rz_str_trim_head_ro(input + 2);
-		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
-		char *text;
-		char *nc = strdup(newcomment);
-		rz_str_unescape(nc);
-		if (comment) {
-			text = malloc(strlen(comment) + strlen(newcomment) + 2);
-			if (text) {
-				strcpy(text, comment);
-				strcat(text, " ");
-				strcat(text, nc);
-				rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, addr, text);
-				free(text);
-			} else {
-				rz_sys_perror("malloc");
-			}
-		} else {
-			rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, addr, nc);
-		}
-		free(nc);
-	} break;
-	case '*': // "CC*"
-		rz_meta_print_list_all(core->analysis, RZ_META_TYPE_COMMENT, 1);
-		break;
-	case '-': // "CC-"
-		if (input[2] == '*') { // "CC-*"
-			rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, UT64_MAX, UT64_MAX);
-		} else if (input[2]) { // "CC-$$+32"
-			ut64 arg = rz_num_math(core->num, input + 2);
-			rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, arg, 1);
-		} else { // "CC-"
-			rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, core->offset, 1);
-		}
-		break;
-	case 'u': // "CCu"
-		//
-		{
-			char *comment;
-			const char *arg = input + 2;
-			while (*arg && *arg == ' ')
-				arg++;
-			if (!strncmp(arg, "base64:", 7)) {
-				char *s = (char *)sdb_decode(arg + 7, NULL);
-				if (s) {
-					comment = s;
-				} else {
-					comment = NULL;
-				}
-			} else {
-				comment = strdup(arg);
-			}
-			if (comment) {
-				rz_core_meta_comment_add(core, comment, addr);
-				free(comment);
-			}
-		}
-		break;
-	case 'a': // "CCa"
-	{
-		char *s, *p;
-		s = strchr(input, ' ');
-		if (s) {
-			s = strdup(s + 1);
-		} else {
-			eprintf("Usage\n");
-			return false;
-		}
-		p = strchr(s, ' ');
-		if (p) {
-			*p++ = 0;
-		}
-		ut64 addr;
-		if (input[2] == '-') {
-			if (input[3]) {
-				addr = rz_num_math(core->num, input + 3);
-				rz_meta_del(core->analysis,
-					RZ_META_TYPE_COMMENT,
-					addr, 1);
-			} else
-				eprintf("Usage: CCa-[address]\n");
-			free(s);
-			return true;
-		}
-		addr = rz_num_math(core->num, s);
-		// Comment at
-		if (p) {
-			if (input[2] == '+') {
-				const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
-				if (comment) {
-					char *text = rz_str_newf("%s\n%s", comment, p);
-					rz_meta_set(core->analysis, RZ_META_TYPE_COMMENT, addr, 1, text);
-					free(text);
-				} else {
-					rz_meta_set(core->analysis, RZ_META_TYPE_COMMENT, addr, 1, p);
-				}
-			} else {
-				rz_meta_set(core->analysis, RZ_META_TYPE_COMMENT, addr, 1, p);
-			}
-		} else {
-			eprintf("Usage: CCa [address] [comment]\n");
-		}
-		free(s);
-		return true;
-	}
-	}
-	return true;
+inline const char *meta_get_flag(RzCore *core, ut64 addr) {
+	RzFlagItem *fi;
+	fi = rz_flag_get_i(core->flags, addr);
+	return fi ? fi->name : NULL;
 }
 
-static int cmd_meta_vartype_comment(RzCore *core, const char *input) {
-	ut64 addr = core->offset;
-	switch (input[1]) {
-	case '?': // "Ct?"
-		rz_core_cmd_help(core, help_msg_Ct);
-		break;
-	case 0: // "Ct"
-		rz_meta_print_list_all(core->analysis, RZ_META_TYPE_VARTYPE, 0);
-		break;
-	case ' ': // "Ct <vartype comment> @ addr"
-	{
-		const char *newcomment = rz_str_trim_head_ro(input + 2);
-		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_VARTYPE, addr);
-		char *nc = strdup(newcomment);
-		rz_str_unescape(nc);
-		if (comment) {
-			char *text = rz_str_newf("%s %s", comment, nc);
-			if (text) {
-				rz_meta_set_string(core->analysis, RZ_META_TYPE_VARTYPE, addr, text);
-				free(text);
-			} else {
-				rz_sys_perror("malloc");
-			}
-		} else {
-			rz_meta_set_string(core->analysis, RZ_META_TYPE_VARTYPE, addr, nc);
-		}
-		free(nc);
-	} break;
-	case '.': // "Ct. @ addr"
-	{
-		ut64 at = input[2] ? rz_num_math(core->num, input + 2) : addr;
-		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_VARTYPE, at);
-		if (comment) {
-			rz_cons_println(comment);
-		}
-	} break;
-	case '-': // "Ct-"
-		rz_meta_del(core->analysis, RZ_META_TYPE_VARTYPE, core->offset, 1);
-		break;
-	default:
-		rz_core_cmd_help(core, help_msg_Ct);
-		break;
-	}
-
-	return true;
-}
-
+#if 0
 static int cmd_meta_others(RzCore *core, const char *input) {
 	int n, type = input[0], subtype;
 	char *t = 0, *p, *p2, name[256];
@@ -414,72 +48,21 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 				"to show the fields you know about (perhaps using 'skip' fields), and 'sz'\n"
 				"to match the total struct size in mem.\n");
 			break;
-		case 's': // "Cs?"
-			rz_core_cmd_help(core, help_msg_Cs);
-			break;
-		default:
-			rz_cons_println("See C?");
-			break;
 		}
 		break;
-	case '-': // "Cf-", "Cd-", ...
-		switch (input[2]) {
-		case '*': // "Cf-*", "Cd-*", ...
-			rz_meta_del(core->analysis, input[0], 0, UT64_MAX);
-			break;
-		case ' ':
-			p2 = strchr(input + 3, ' ');
-			if (p2) {
-				ut64 i;
-				ut64 size = rz_num_math(core->num, input + 3);
-				ut64 rep = rz_num_math(core->num, p2 + 1);
-				ut64 cur_addr = addr;
-				if (!size) {
-					break;
-				}
-				for (i = 0; i < rep && UT64_MAX - cur_addr > size; i++, cur_addr += size) {
-					rz_meta_del(core->analysis, input[0], cur_addr, size);
-				}
-				break;
-			} else {
-				addr = rz_num_math(core->num, input + 3);
-				/* fallthrough */
-			}
-		default:
-			rz_meta_del(core->analysis, input[0], addr, 1);
-			break;
-		}
-		break;
-	case '*': // "Cf*", "Cd*", ...
-		rz_meta_print_list_all(core->analysis, input[0], 1);
-		break;
-	case 'j': // "Cfj", "Cdj", ...
-		rz_meta_print_list_all(core->analysis, input[0], 'j');
-		break;
-	case '!': // "Cf!", "Cd!", ...
-	{
-		char *out;
-		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, addr);
-		out = rz_core_editor(core, NULL, comment);
-		if (out) {
-			rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, addr, 1);
-			rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, addr, out);
-			free(out);
-		}
-	} break;
 	case '.': // "Cf.", "Cd.", ...
 		if (input[2] == '.') { // "Cs.."
 			ut64 size;
 			RzAnalysisMetaItem *mi = rz_meta_get_at(core->analysis, addr, type, &size);
 			if (mi) {
-				rz_meta_print(core->analysis, mi, addr, size, input[3], NULL, false);
+				rz_core_meta_print(core->analysis, mi, addr, size, input[3], NULL, false);
 			}
 			break;
 		} else if (input[2] == 'j') { // "Cs.j"
 			ut64 size;
 			RzAnalysisMetaItem *mi = rz_meta_get_at(core->analysis, addr, type, &size);
 			if (mi) {
-				rz_meta_print(core->analysis, mi, addr, size, input[2], NULL, false);
+				rz_core_meta_print(core->analysis, mi, addr, size, input[2], NULL, false);
 				rz_cons_newline();
 			}
 			break;
@@ -489,25 +72,9 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 		if (!mi) {
 			break;
 		}
-		if (type == 's') {
-			char *esc_str;
-			bool esc_bslash = core->print->esc_bslash;
-			switch (mi->subtype) {
-			case RZ_STRING_ENC_UTF8:
-				esc_str = rz_str_escape_utf8(mi->str, false, esc_bslash);
-				break;
-			case 0: /* temporary legacy workaround */
-				esc_bslash = false;
-			default:
-				esc_str = rz_str_escape_latin1(mi->str, false, esc_bslash, false);
-			}
-			if (esc_str) {
-				rz_cons_printf("\"%s\"\n", esc_str);
-				free(esc_str);
-			} else {
-				rz_cons_println("<oom>");
-			}
-		} else if (type == 'd') {
+		if (type == RZ_META_TYPE_STRING) {
+			meta_string_print(core, mi);
+		} else if (type == RZ_META_TYPE_DATA) {
 			rz_cons_printf("%" PFMT64u "\n", size);
 		} else {
 			rz_cons_println(mi->str);
@@ -519,7 +86,7 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 	case 'a':
 	case '8':
 		if (type != 'z' && !input[1] && !core->tmpseek) {
-			rz_meta_print_list_all(core->analysis, type, 0);
+			rz_core_meta_print_list_all(core->analysis, type, 0);
 			break;
 		}
 		if (type == 'z') {
@@ -547,9 +114,9 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 			p = NULL;
 			n = 0;
 			strncpy(name, t, sizeof(name) - 1);
-			if (type != 'C') {
+			if (type != RZ_META_TYPE_COMMENT) {
 				n = rz_num_math(core->num, t);
-				if (type == 'f') { // "Cf"
+				if (type == RZ_META_TYPE_FORMAT) { // "Cf"
 					p = strchr(t, ' ');
 					if (p) {
 						p = (char *)rz_str_trim_head_ro(p);
@@ -585,7 +152,7 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 						eprintf("Usage: Cf [size] [pf-format-string]\n");
 						break;
 					}
-				} else if (type == 's') { // "Cs"
+				} else if (type == RZ_META_TYPE_STRING) { // "Cs"
 					char tmp[256] = RZ_EMPTY;
 					int i, j, name_len = 0;
 					if (input[1] == 'a' || input[1] == '8') {
@@ -644,7 +211,7 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 			if (!n) {
 				n++;
 			}
-			if (type == 's') {
+			if (type == RZ_META_TYPE_STRING) {
 				switch (input[1]) {
 				case 'a':
 				case '8':
@@ -671,126 +238,6 @@ static int cmd_meta_others(RzCore *core, const char *input) {
 	return true;
 }
 
-void rz_comment_var_help(RzCore *core, char type) {
-	switch (type) {
-	case 'b':
-		rz_core_cmd_help(core, help_msg_Cvb);
-		break;
-	case 's':
-		rz_core_cmd_help(core, help_msg_Cvs);
-		break;
-	case 'r':
-		rz_core_cmd_help(core, help_msg_Cvr);
-		break;
-	case '?':
-		rz_cons_printf("See Cvb?, Cvs? and Cvr?\n");
-	}
-}
-
-void rz_comment_vars(RzCore *core, const char *input) {
-	//TODO enable base64 and make it the default for C*
-	RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, core->offset, 0);
-	char *oname = NULL, *name = NULL;
-
-	if (!input[0] || input[1] == '?' || (input[0] != 'b' && input[0] != 'r' && input[0] != 's')) {
-		rz_comment_var_help(core, input[0]);
-		return;
-	}
-	if (!fcn) {
-		eprintf("Can't find function here\n");
-		return;
-	}
-	oname = name = rz_str_trim_dup(input + 1);
-	switch (input[1]) {
-	case '*': // "Cv*"
-	case '\0': { // "Cv"
-		void **it;
-		char kind = input[0];
-		rz_pvector_foreach (&fcn->vars, it) {
-			RzAnalysisVar *var = *it;
-			if (var->kind != kind || !var->comment) {
-				continue;
-			}
-			if (!input[1]) {
-				rz_cons_printf("%s : %s\n", var->name, var->comment);
-			} else {
-				char *b64 = sdb_encode((const ut8 *)var->comment, strlen(var->comment));
-				if (!b64) {
-					continue;
-				}
-				rz_cons_printf("\"Cv%c %s base64:%s @ 0x%08" PFMT64x "\"\n", kind, var->name, b64, fcn->addr);
-			}
-		}
-	} break;
-	case ' ': { // "Cv "
-		char *comment = strchr(name, ' ');
-		char *heap_comment = NULL;
-		if (comment) { // new comment given
-			if (*comment) {
-				*comment++ = 0;
-			}
-			if (!strncmp(comment, "base64:", 7)) {
-				heap_comment = (char *)sdb_decode(comment + 7, NULL);
-				comment = heap_comment;
-			}
-		}
-		RzAnalysisVar *var = rz_analysis_function_get_var_byname(fcn, name);
-		if (!var) {
-			int idx = (int)strtol(name, NULL, 0);
-			var = rz_analysis_function_get_var(fcn, input[0], idx);
-		}
-		if (!var) {
-			eprintf("can't find variable at given offset\n");
-		} else {
-			if (var->comment) {
-				if (comment && *comment) {
-					char *text = rz_str_newf("%s\n%s", var->comment, comment);
-					free(var->comment);
-					var->comment = text;
-				} else {
-					rz_cons_println(var->comment);
-				}
-			} else {
-				var->comment = strdup(comment);
-			}
-		}
-		free(heap_comment);
-	} break;
-	case '-': { // "Cv-"
-		name++;
-		rz_str_trim(name);
-		RzAnalysisVar *var = rz_analysis_function_get_var_byname(fcn, name);
-		if (!var) {
-			int idx = (int)strtol(name, NULL, 0);
-			var = rz_analysis_function_get_var(fcn, input[0], idx);
-		}
-		if (!var) {
-			eprintf("can't find variable at given offset\n");
-			break;
-		}
-		free(var->comment);
-		var->comment = NULL;
-		break;
-	}
-	case '!': { // "Cv!"
-		char *comment;
-		name++;
-		rz_str_trim(name);
-		RzAnalysisVar *var = rz_analysis_function_get_var_byname(fcn, name);
-		if (!var) {
-			eprintf("can't find variable named `%s`\n", name);
-			break;
-		}
-		comment = rz_core_editor(core, NULL, var->comment);
-		if (comment) {
-			free(var->comment);
-			var->comment = comment;
-		}
-	} break;
-	}
-	free(oname);
-}
-
 RZ_IPI int rz_cmd_meta(void *data, const char *input) {
 	RzCore *core = (RzCore *)data;
 	RzAnalysisFunction *f;
@@ -798,31 +245,6 @@ RZ_IPI int rz_cmd_meta(void *data, const char *input) {
 	int i;
 
 	switch (*input) {
-	case 'v': // "Cv"
-		rz_comment_vars(core, input + 1);
-		break;
-	case '\0': // "C"
-		rz_meta_print_list_all(core->analysis, RZ_META_TYPE_ANY, 0);
-		break;
-	case 'j': // "Cj"
-	case '*': { // "C*"
-		if (!input[0] || input[1] == '.') {
-			rz_meta_print_list_at(core->analysis, core->offset, *input);
-		} else {
-			rz_meta_print_list_all(core->analysis, RZ_META_TYPE_ANY, *input);
-		}
-		break;
-	}
-	case '.': { // "C."
-		rz_meta_print_list_at(core->analysis, core->offset, 0);
-		break;
-	}
-	case 'C': // "CC"
-		cmd_meta_comment(core, input);
-		break;
-	case 't': // "Ct" type analysis commnets
-		cmd_meta_vartype_comment(core, input);
-		break;
 	case 'r': // "Cr" run command
 	case 'h': // "Ch" comment
 	case 's': // "Cs" string
@@ -832,67 +254,535 @@ RZ_IPI int rz_cmd_meta(void *data, const char *input) {
 	case 'f': // "Cf" formatted
 		cmd_meta_others(core, input);
 		break;
-	case '-': // "C-"
-		if (input[1] != '*') {
-			i = input[1] ? rz_num_math(core->num, input + (input[1] == ' ' ? 2 : 1)) : 1;
-			rz_meta_del(core->analysis, RZ_META_TYPE_ANY, core->offset, i);
-		} else {
-			rz_meta_del(core->analysis, RZ_META_TYPE_ANY, 0, UT64_MAX);
-		}
-		break;
-	case '?': // "C?"
-		rz_core_cmd_help(core, help_msg_C);
-		break;
-	case 'F': // "CF"
-		f = rz_analysis_get_fcn_in(core->analysis, core->offset,
-			RZ_ANALYSIS_FCN_TYPE_FCN | RZ_ANALYSIS_FCN_TYPE_SYM);
-		if (f) {
-			rz_analysis_function_set_type_str(core->analysis, f, input + 2);
-		} else {
-			eprintf("Cannot find function here\n");
-		}
-		break;
-	case 'S': // "CS"
-		ms = &core->analysis->meta_spaces;
-		/** copypasta from `fs`.. this must be refactorized to be shared */
-		switch (input[1]) {
-		case '?': // "CS?"
-			rz_core_cmd_help(core, help_msg_CS);
-			break;
-		case '+': // "CS+"
-			rz_spaces_push(ms, input + 2);
-			break;
-		case 'r': // "CSr"
-			if (input[2] == ' ') {
-				rz_spaces_rename(ms, NULL, input + 2);
-			} else {
-				eprintf("Usage: CSr [newname]\n");
-			}
-			break;
-		case '-': // "CS-"
-			if (input[2]) {
-				if (input[2] == '*') {
-					rz_spaces_unset(ms, NULL);
-				} else {
-					rz_spaces_unset(ms, input + 2);
-				}
-			} else {
-				rz_spaces_pop(ms);
-			}
-			break;
-		case 'j': // "CSj"
-		case '\0': // "CS"
-		case '*': // "CS*"
-			spaces_list(ms, input[1]);
-			break;
-		case ' ': // "CS "
-			rz_spaces_set(ms, input + 2);
-			break;
-		default:
-			spaces_list(ms, 0);
-			break;
-		}
-		break;
-	}
 	return true;
 }
+#endif
+
+static void meta_string_print(RzCore *core, RzAnalysisMetaItem *mi) {
+	char *esc_str;
+	bool esc_bslash = core->print->esc_bslash;
+	switch (mi->subtype) {
+	case RZ_STRING_ENC_UTF8:
+		esc_str = rz_str_escape_utf8(mi->str, false, esc_bslash);
+		break;
+	case 0: /* temporary legacy workaround */
+		esc_bslash = false;
+	default:
+		esc_str = rz_str_escape_latin1(mi->str, false, esc_bslash, false);
+	}
+	if (esc_str) {
+		rz_cons_printf("\"%s\"\n", esc_str);
+		free(esc_str);
+	} else {
+		rz_cons_println("<oom>");
+	}
+}
+
+static void meta_format_print(RzCore *core, ut64 addr, ut64 size, const char *format) {
+	const char *fmt = format;
+	if (*fmt == '.') {
+		const char *realformat = rz_type_db_format_get(core->analysis->typedb, fmt + 1);
+		if (realformat) {
+			fmt = (char *)realformat;
+		} else {
+			RZ_LOG_ERROR("Cannot resolve format '%s'\n", fmt + 1);
+			return;
+		}
+	}
+	if (size < 1) {
+		size = rz_type_format_struct_size(core->analysis->typedb, fmt, 0, 0);
+		if (size < 1) {
+			eprintf("Warning: Cannot resolve struct size for '%s'\n", fmt);
+			size = 32; //
+		}
+	}
+	//make sure we do not overflow on rz_type_format
+	if (size > core->blocksize) {
+		size = core->blocksize;
+	}
+	char *fmtstring = rz_type_format_data(core->analysis->typedb, core->print, addr, core->block,
+		size, fmt, 0, NULL, NULL);
+	if (!fmtstring) {
+		size = -1;
+	} else {
+		rz_cons_print(format);
+		free(format);
+	}
+}
+
+static RzCmdStatus meta_variable_comment_list(RzCore *core, RzAnalysisVarKind kind, RzCmdStateOutput *state) {
+	RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, core->offset, 0);
+	if (!fcn) {
+		RZ_LOG_ERROR("Cannot find the function at the 0x%08" PFMT64x " offset", core->offset);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	void **it;
+	rz_pvector_foreach (&fcn->vars, it) {
+		RzAnalysisVar *var = *it;
+		if (var->kind != kind || !var->comment) {
+			continue;
+		}
+		PJ *pj = state->d.pj;
+		switch (state->mode) {
+		case RZ_OUTPUT_MODE_JSON:
+			pj_o(pj);
+			pj_ks(pj, "name", var->name);
+			pj_ks(pj, "comment", var->comment);
+			pj_end(pj);
+			break;
+		case RZ_OUTPUT_MODE_STANDARD:
+			rz_cons_printf("%s : %s\n", var->name, var->comment);
+			break;
+		case RZ_OUTPUT_MODE_RIZIN: {
+			char *b64 = sdb_encode((const ut8 *)var->comment, strlen(var->comment));
+			if (!b64) {
+				continue;
+			}
+			rz_cons_printf("\"Cv%c %s base64:%s @ 0x%08" PFMT64x "\"\n", kind, var->name, b64, fcn->addr);
+			break;
+		}
+		default:
+			rz_warn_if_reached();
+			break;
+		}
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+static RzCmdStatus meta_variable_comment_append(RzCore *core, const char *name, const char *comment) {
+	RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, core->offset, 0);
+	if (!fcn) {
+		RZ_LOG_ERROR("Cannot find the function at the 0x%08" PFMT64x " offset", core->offset);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	char *heap_comment = NULL;
+	if (RZ_STR_ISNOTEMPTY(comment)) { // new comment given
+		if (!strncmp(comment, "base64:", 7)) {
+			heap_comment = (char *)sdb_decode(comment + 7, NULL);
+			comment = heap_comment;
+		}
+	}
+	RzAnalysisVar *var = rz_analysis_function_get_var_byname(fcn, name);
+	if (!var) {
+		RZ_LOG_ERROR("Can't find variable named `%s`\n", name);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	if (var->comment) {
+		if (comment && *comment) {
+			char *text = rz_str_newf("%s\n%s", var->comment, comment);
+			free(var->comment);
+			var->comment = text;
+		} else {
+			rz_cons_println(var->comment);
+		}
+	} else {
+		var->comment = strdup(comment);
+	}
+	free(heap_comment);
+	return RZ_CMD_STATUS_OK;
+}
+
+static RzCmdStatus meta_variable_comment_remove(RzCore *core, const char *name) {
+	RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, core->offset, 0);
+	if (!fcn) {
+		RZ_LOG_ERROR("Cannot find the function at the 0x%08" PFMT64x " offset", core->offset);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	RzAnalysisVar *var = rz_analysis_function_get_var_byname(fcn, name);
+	if (!var) {
+		RZ_LOG_ERROR("Can't find variable named `%s`\n", name);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	free(var->comment);
+	var->comment = NULL;
+	return RZ_CMD_STATUS_OK;
+}
+
+static RzCmdStatus meta_variable_comment_editor(RzCore *core, const char *name) {
+	RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, core->offset, 0);
+	if (!fcn) {
+		RZ_LOG_ERROR("Cannot find the function at the 0x%08" PFMT64x " offset", core->offset);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	RzAnalysisVar *var = rz_analysis_function_get_var_byname(fcn, name);
+	if (!var) {
+		RZ_LOG_ERROR("Can't find variable named `%s`\n", name);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	char *comment = rz_core_editor(core, NULL, var->comment);
+	if (comment) {
+		free(var->comment);
+		var->comment = comment;
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+static void meta_comment_append(RzCore *core, const char *newcomment, RzAnalysisMetaType mtype, ut64 addr) {
+	const char *comment = rz_meta_get_string(core->analysis, mtype, addr);
+	char *nc = strdup(newcomment);
+	rz_str_unescape(nc);
+	if (comment) {
+		char *text = rz_str_newf("%s %s", comment, nc);
+		if (text) {
+			rz_meta_set_string(core->analysis, mtype, addr, text);
+			free(text);
+		} else {
+			rz_sys_perror("malloc");
+		}
+	} else {
+		rz_meta_set_string(core->analysis, mtype, addr, nc);
+	}
+	free(nc);
+}
+
+static void meta_editor(RzCore *core, RzAnalysisMetaType mtype, ut64 addr) {
+	const char *comment = rz_meta_get_string(core->analysis, mtype, addr);
+	char *out = rz_core_editor(core, NULL, comment);
+	if (out) {
+		rz_meta_del(core->analysis, mtype, addr, 1);
+		rz_meta_set_string(core->analysis, mtype, addr, out);
+		free(out);
+	}
+}
+
+static void meta_remove_all(RzCore *core, RzAnalysisMetaType mtype) {
+	rz_meta_del(core->analysis, mtype, 0, UT64_MAX);
+}
+
+static void meta_remove(RzCore *core, RzAnalysisMetaType mtype, ut64 addr) {
+	rz_meta_del(core->analysis, mtype, addr, 1);
+}
+
+static void meta_remove_size(RzCore *core, RzAnalysisMetaType mtype, ut64 addr, ut64 size) {
+	rz_meta_del(core->analysis, mtype, addr, size);
+}
+
+RZ_IPI RzCmdStatus rz_meta_list_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	rz_core_meta_print_list_all(core, RZ_META_TYPE_ANY, state);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_list_at_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	rz_core_meta_print_list_at(core, core->offset, state);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_remove_handler(RzCore *core, int argc, const char **argv) {
+	rz_meta_del(core->analysis, RZ_META_TYPE_ANY, core->offset, 1);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_remove_all_handler(RzCore *core, int argc, const char **argv) {
+	rz_meta_del(core->analysis, RZ_META_TYPE_ANY, 0, UT64_MAX);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	if (argc > 1) {
+		meta_comment_append(core, argv[1], RZ_META_TYPE_COMMENT, core->offset);
+	} else {
+		rz_core_meta_print_list_all(core, RZ_META_TYPE_COMMENT, state);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_at_handler(RzCore *core, int argc, const char **argv) {
+	const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, core->offset);
+	if (comment) {
+		rz_cons_println(comment);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_append_handler(RzCore *core, int argc, const char **argv) {
+	meta_comment_append(core, argv[1], RZ_META_TYPE_COMMENT, core->offset);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_remove_handler(RzCore *core, int argc, const char **argv) {
+	rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, core->offset, 1);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_remove_all_handler(RzCore *core, int argc, const char **argv) {
+	rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, UT64_MAX, UT64_MAX);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_filelink_handler(RzCore *core, int argc, const char **argv) {
+	if (argc > 1) {
+		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, core->offset);
+		if (RZ_STR_ISNOTEMPTY(comment)) {
+			// Append filename to the current comment
+			char *nc = rz_str_newf("%s ,(%s)", comment, argv[1]);
+			rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, core->offset, nc);
+			free(nc);
+		} else {
+			char *newcomment = rz_str_newf(",(%s)", argv[1]);
+			rz_meta_set_string(core->analysis, RZ_META_TYPE_COMMENT, core->offset, newcomment);
+			free(newcomment);
+		}
+	} else {
+		const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, core->offset);
+		if (RZ_STR_ISNOTEMPTY(comment)) {
+			char *cmtfile = rz_str_between(comment, ",(", ")");
+			if (cmtfile && *cmtfile) {
+				char *cwd = getcommapath(core);
+				rz_cons_printf("%s" RZ_SYS_DIR "%s\n", cwd, cmtfile);
+				free(cwd);
+			}
+			free(cmtfile);
+		}
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_add_at_handler(RzCore *core, int argc, const char **argv) {
+	meta_comment_append(core, argv[1], RZ_META_TYPE_COMMENT, core->offset);
+	ut64 addr = rz_num_math(core->num, argv[1]);
+	rz_meta_set(core->analysis, RZ_META_TYPE_COMMENT, addr, 1, argv[2]);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_editor_handler(RzCore *core, int argc, const char **argv) {
+	meta_editor(core, RZ_META_TYPE_COMMENT, core->offset);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_function_list_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	rz_core_meta_print_list_in_function(core, RZ_META_TYPE_COMMENT, core->offset, state);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_function_remove_handler(RzCore *core, int argc, const char **argv) {
+	RzAnalysisFunction *fcn = rz_analysis_get_fcn_in(core->analysis, core->offset, 0);
+	if (!fcn) {
+		RZ_LOG_ERROR("Cannot find the function at the 0x%08" PFMT64x " offset", core->offset);
+		return RZ_CMD_STATUS_ERROR;
+	}
+	RzAnalysisBlock *bb;
+	RzListIter *iter;
+	rz_list_foreach (fcn->bbs, iter, bb) {
+		int i;
+		for (i = 0; i < bb->size; i++) {
+			ut64 addr = bb->addr + i;
+			rz_meta_del(core->analysis, RZ_META_TYPE_COMMENT, addr, 1);
+		}
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_comment_unique_handler(RzCore *core, int argc, const char **argv) {
+	char *comment = NULL;
+	if (!strncmp(argv[1], "base64:", 7)) {
+		char *s = (char *)sdb_decode(argv[1] + 7, NULL);
+		if (s) {
+			comment = s;
+		}
+	} else {
+		comment = strdup(argv[1]);
+	}
+	if (comment) {
+		rz_core_meta_comment_add(core, comment, core->offset);
+		free(comment);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_space_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	RzSpaces *ms = &core->analysis->meta_spaces;
+	spaces_list(ms, state->mode);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_space_rename_handler(RzCore *core, int argc, const char **argv) {
+	RzSpaces *ms = &core->analysis->meta_spaces;
+	rz_spaces_rename(ms, argv[1], argv[2]);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_space_remove_handler(RzCore *core, int argc, const char **argv) {
+	RzSpaces *ms = &core->analysis->meta_spaces;
+	rz_spaces_unset(ms, argv[1]);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_space_remove_all_handler(RzCore *core, int argc, const char **argv) {
+	RzSpaces *ms = &core->analysis->meta_spaces;
+	rz_spaces_unset(ms, NULL);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_var_comment_append_handler(RzCore *core, int argc, const char **argv) {
+	return meta_variable_comment_append(core, argv[1], argv[2]);
+}
+
+RZ_IPI RzCmdStatus rz_meta_var_comment_remove_handler(RzCore *core, int argc, const char **argv) {
+	return meta_variable_comment_remove(core, argv[1]);
+}
+
+RZ_IPI RzCmdStatus rz_meta_var_comment_editor_handler(RzCore *core, int argc, const char **argv) {
+	return meta_variable_comment_editor(core, argv[1]);
+}
+
+RZ_IPI RzCmdStatus rz_meta_var_reg_comment_list_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	return meta_variable_comment_list(core, RZ_ANALYSIS_VAR_KIND_REG, state);
+}
+
+RZ_IPI RzCmdStatus rz_meta_var_bp_comment_list_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	return meta_variable_comment_list(core, RZ_ANALYSIS_VAR_KIND_BPV, state);
+}
+
+RZ_IPI RzCmdStatus rz_meta_var_stack_comment_list_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	return meta_variable_comment_list(core, RZ_ANALYSIS_VAR_KIND_SPV, state);
+}
+
+RZ_IPI RzCmdStatus rz_meta_type_current_handler(RzCore *core, int argc, const char **argv) {
+	const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_VARTYPE, core->offset);
+	if (comment) {
+		rz_cons_println(comment);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_data_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	if (argc > 1) {
+		ut64 i, addr = core->offset;
+		ut64 size = rz_num_math(core->num, argv[1]);
+		ut64 repeat = argc > 2 ? rz_num_math(core->num, argv[2]) : 1;
+		for (i = 0; i < repeat; i++, addr += size) {
+			rz_meta_set(core->analysis, RZ_META_TYPE_DATA, addr, size, NULL);
+		}
+	} else {
+		rz_core_meta_print_list_all(core, RZ_META_TYPE_DATA, state);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_data_remove_handler(RzCore *core, int argc, const char **argv) {
+	meta_remove(core, RZ_META_TYPE_DATA, core->offset);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_data_remove_all_handler(RzCore *core, int argc, const char **argv) {
+	meta_remove_all(core, RZ_META_TYPE_DATA);
+	return RZ_CMD_STATUS_OK;
+}
+
+static meta_string_ascii_add(RzCore *core, ut64 addr, char *name) {
+	(void)rz_io_read_at(core->io, addr, (ut8 *)name, sizeof(name) - 1);
+	name[sizeof(name) - 1] = '\0';
+	name_len = strlen(name);
+}
+
+static meta_string_wide_add(RzCore *core, ut64 addr, size_t limit) {
+	rz_return_if_fail(limit);
+	ut8 *tmp = malloc(limit + 1);
+	if (!tmp) {
+		return;
+	}
+	(void)rz_io_read_at(core->io, addr, tmp, limit - 3);
+	name_len = rz_str_nlen_w(tmp, limit - 3);
+	int i, j;
+	for (i = 0, j = 0; i < sizeof(name); i++, j++) {
+		name[i] = tmp[j];
+		if (!tmp[j]) {
+			break;
+		}
+		if (!tmp[j + 1]) {
+			if (j + 3 < sizeof(tmp)) {
+				if (tmp[j + 3]) {
+					break;
+				}
+			}
+			j++;
+		}
+	}
+	name[sizeof(name) - 1] = '\0';
+}
+
+static meta_string_add(RzCore *core, ut64 addr, ut64 size, RzStrEnc encoding) {
+	if (encoding == RZ_STRING_ENC_LATIN1 || encoding == RZ_STRING_ENC_UTF8) {
+		meta_string_ascii_add(core, addr, name);
+	} else {
+		meta_string_wide_add(core, addr, name);
+	}
+	rz_meta_set_with_subtype(core->analysis, type, encoding, addr, n, name);
+}
+
+RZ_IPI RzCmdStatus rz_meta_string_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	if (argc > 1) {
+		ut64 i, addr = core->offset;
+		ut64 size = rz_num_math(core->num, argv[1]);
+		ut64 repeat = argc > 2 ? rz_num_math(core->num, argv[2]) : 1;
+		for (i = 0; i < repeat; i++, addr += size) {
+			rz_meta_set(core->analysis, RZ_META_TYPE_DATA, addr, size, NULL);
+		}
+	} else {
+		rz_core_meta_print_list_all(core, RZ_META_TYPE_STRING, state);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_string_at_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
+	const char *comment = rz_meta_get_string(core->analysis, RZ_META_TYPE_COMMENT, core->offset);
+	if (comment) {
+		rz_cons_println(comment);
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_string_utf8_handler(RzCore *core, int argc, const char **argv) {
+	ut64 size = rz_num_math(core->num, argv[1]);
+	if (!meta_string_add(core, core->offset, size, RZ_STRING_ENC_UTF8)) {
+		return RZ_CMD_STATUS_ERROR;
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_string_ascii_handler(RzCore *core, int argc, const char **argv) {
+	ut64 size = rz_num_math(core->num, argv[1]);
+	if (!meta_string_add(core, core->offset, size, RZ_STRING_ENC_LATIN1)) {
+		return RZ_CMD_STATUS_ERROR;
+	}
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_string_remove_handler(RzCore *core, int argc, const char **argv) {
+	meta_remove(core, RZ_META_TYPE_STRING, core->offset);
+	return RZ_CMD_STATUS_OK;
+}
+
+RZ_IPI RzCmdStatus rz_meta_string_remove_all_handler(RzCore *core, int argc, const char **argv) {
+	meta_remove_all(core, RZ_META_TYPE_STRING);
+	return RZ_CMD_STATUS_OK;
+}
+
+// These commands follow the same pattern
+#define RZ_META_COMMAND_DESCRIPTOR(name, type) \
+RZ_IPI RzCmdStatus rz_meta_##name##_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) { \
+	if (argc > 1) { \
+		meta_comment_append(core, argv[1], type, core->offset); \
+	} else { \
+		rz_core_meta_print_list_all(core, type, state); \
+	} \
+	return RZ_CMD_STATUS_OK; \
+} \
+RZ_IPI RzCmdStatus rz_meta_##name##_remove_handler(RzCore *core, int argc, const char **argv) { \
+	meta_remove(core, type, core->offset); \
+	return RZ_CMD_STATUS_OK; \
+} \
+RZ_IPI RzCmdStatus rz_meta_##name##_remove_all_handler(RzCore *core, int argc, const char **argv) { \
+	meta_remove_all(core, type); \
+	return RZ_CMD_STATUS_OK; \
+} \
+RZ_IPI RzCmdStatus rz_meta_##name##_editor_handler(RzCore *core, int argc, const char **argv) { \
+	meta_editor(core, type, core->offset); \
+	return RZ_CMD_STATUS_OK; \
+}
+
+RZ_META_COMMAND_DESCRIPTOR(type, RZ_META_TYPE_VARTYPE);
+RZ_META_COMMAND_DESCRIPTOR(format, RZ_META_TYPE_FORMAT);
+RZ_META_COMMAND_DESCRIPTOR(hidden, RZ_META_TYPE_HIDE);
+RZ_META_COMMAND_DESCRIPTOR(magic, RZ_META_TYPE_MAGIC);
+RZ_META_COMMAND_DESCRIPTOR(run, RZ_META_TYPE_RUN);

@@ -216,7 +216,7 @@ NAME=arm1.bin dword pointers with Cd
 FILE=bins/elf/arm1.bin
 CMDS=<<EOF
 s 0xdb98
-Cd 4[3]
+Cd 4 3
 pd 3
 EOF
 EXPECT=<<EOF
@@ -230,7 +230,7 @@ NAME=arm1.bin dword pointers with Cd and ahi 1
 FILE=bins/elf/arm1.bin
 CMDS=<<EOF
 s 0xdb98
-Cd 4[3]
+Cd 4 3
 ahi 1
 pd 3
 EOF
@@ -245,7 +245,7 @@ NAME=arm1.bin dword pointers with Cd and ahi 8
 FILE=bins/elf/arm1.bin
 CMDS=<<EOF
 s 0xdb98
-Cd 4[3]
+Cd 4 3
 ahi 8
 pd 3
 EOF
@@ -260,7 +260,7 @@ NAME=arm1.bin dword pointers with Cd and ahi 10
 FILE=bins/elf/arm1.bin
 CMDS=<<EOF
 s 0xdb98
-Cd 4[3]
+Cd 4 3
 ahi 10
 pd 3
 EOF
@@ -275,7 +275,7 @@ NAME=arm1.bin dword pointers with Cd and ahi 16
 FILE=bins/elf/arm1.bin
 CMDS=<<EOF
 s 0xdb98
-Cd 4[3]
+Cd 4 4
 ahi 16
 pd 3
 EOF
