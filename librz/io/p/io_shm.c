@@ -62,6 +62,8 @@ static int shm__close(RzIODesc *fd) {
 #else
 	if (shm->buf) {
 		ret = shmdt(((RzIOShm *)(fd->data))->buf);
+	} else {
+		ret = close(shm->fd);
 	}
 #endif
 	free(shm->name);
@@ -106,10 +108,10 @@ static RzIODesc *shm__open(RzIO *io, const char *pathname, int rw, int mode) {
 		return NULL;
 	}
 	const char *ptr = pathname + 6;
-	shm->name = strdup(ptr);
+	shm->name = rz_str_newf("/%s", ptr);
 #if HAVE_SHM_OPEN
 	shm->id = rz_str_hash(ptr);
-	shm->fd = shm_open(ptr, O_CREAT | (rw ? O_RDWR : O_RDONLY), 0644);
+	shm->fd = shm_open(shm->name, O_CREAT | (rw ? O_RDWR : O_RDONLY), 0644);
 	if (shm->fd == -1) {
 		RZ_LOG_ERROR("Cannot connect to shared memory \"%s\" (0x%08x)\n", shm->name, shm->id);
 		free(shm->name);
@@ -141,13 +143,14 @@ static RzIODesc *shm__open(RzIO *io, const char *pathname, int rw, int mode) {
 	}
 	shm->size = SHMATSZ;
 	if (shm->fd == -1) {
-		eprintf("Cannot connect to shared memory (%d)\n", shm->id);
+		RZ_LOG_ERROR("Cannot connect to shared memory (%d)\n", shm->id);
 		free(shm->name);
 		free(shm);
 		return NULL;
 	}
 #endif
-	eprintf("Connected to shared memory \"%s\" (0x%08x)\n", shm->name, shm->id);
+	RZ_LOG_INFO("Connected to shared memory \"%s\" (0x%08x) size 0x%x\n",
+		shm->name, shm->id, shm->size);
 	return rz_io_desc_new(io, &rz_io_plugin_shm, pathname, rw, mode, shm);
 }
 
