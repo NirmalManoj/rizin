@@ -234,7 +234,7 @@ NAME=enum __acrt_fenv_abstract_status of arm PDB
 FILE=bins/pe/hello_world_arm/hello_world_arm_ZiZoO2.pdb
 CMDS=!rz-bin -P ${RZ_FILE} | grep "__acrt_fenv_abstract_status {"
 EXPECT=<<EOF
-enum __acrt_fenv_abstract_status { 
+enum __acrt_fenv_abstract_status {
 EOF
 RUN
 
